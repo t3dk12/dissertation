@@ -1,0 +1,57 @@
+!-ReaxFF-Parameter-From-Machine-Learning-Computational-Materials-Science-172-(2020)-109393
+39         ! Number of general parameters 
+   50.0000      ! boc1 
+    9.5469      ! boc2 
+    1.6725      ! coa2 
+    1.7224      ! trip4 
+    6.8702      ! trip3 
+   60.4850      ! kc2 
+    1.0588      ! ovun6 
+    4.6000      ! trip2 
+   12.1176      ! ovun7 
+   13.3056      ! ovun8 
+  -55.1978      ! trip1 
+    0.0000      ! swa 
+   10.0000      ! swb 
+    0.0000      ! n.u. 
+   33.8667      ! val6 
+    6.0891      ! lp1 
+    1.0563      ! val9 
+    2.0384      ! val10 
+    0.0000      ! n.u. 
+    6.9290      ! pen2 
+    0.3989      ! pen3 
+    3.9954      ! pen4 
+    0.0000      ! n.u. 
+    5.7796      ! tor2 
+   10.0000      ! tor3 
+    1.9487      ! tor4 
+    0.0000      ! n.u. 
+    2.1645      ! cot2 
+    1.5591      ! vdw1 
+    0.1000      ! cutoff 
+    1.7602      ! coa4 
+    0.6991      ! ovun4 
+   50.0000      ! ovun3 
+    1.8512      ! val8 
+    0.5000      ! acut 
+   20.0000      ! hbtol 
+    0.0000      ! n.u. 
+    0.0000      ! n.u. 
+    0.7903      ! coa3 
+1 ! Nr of atoms; atomID;rosi; val; mass; rvdw; Devdw; gamma; ropi; vale; 
+            alfa; gammaw; valang; ovun5; n.u.; chi; mu; hbond; 
+            ropp; lp2; n.u.; boc4; boc3; boc5; n.u.; n.u.; 
+            ovun2; val3; n.u.; valboc; val5; n.u.; n.u.; atomic; 
+Li   2.1026   1.0000   6.9410   2.1813   0.5429   0.5863  -0.1000   1.0000
+     5.8683   1.3258   1.0000   0.0000   0.0000  -0.3108  12.9881   0.0000
+    -1.0000   0.0000   0.0000   5.4409   6.9107   0.1973   0.0000   0.0000
+   -12.7155   1.4547   0.0000   1.3975   2.8479   0.0000   0.0000   0.0000
+  1  ! Nr of bonds;Desi; Depi; Depp; be1; bo5; corr13; bo6; ovun1; 
+                   be2; bo3; bo4; n.u.; bo1; bo2; ovcorr; n.u.; 
+  1  1  31.8104   0.0000   0.0000   0.4659   0.3000   0.0000  26.0000   0.5783
+         0.8857   0.0000  12.0000   0.0000  -0.2493   4.0259   0.0000   0.0000
+  0  ! off-diagonal terms;Devdw; rvdw; alfa; rosi; ropi; ropp; 
+  0  ! Nr of angles;theta0; val1; val2; coa1; val7; pen1; val4; 
+  0  ! Nr of torsions;V1; V2; V3; tor1; cot1; n.u.; n.u.; 
+  0  ! Nr of Hbonds;rohb; Dehb; hb1; hb2; 

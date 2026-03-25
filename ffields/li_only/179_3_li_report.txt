@@ -1,0 +1,11 @@
+li_build_report
+source=ffields/full_json/179_3_ffield.json
+donor=ffields/reference/c_ffield.json
+donor=ffields/reference/ch4h2o_ffield.json
+donor=ffields/reference/fox_ffield.json
+body3_repeated=6
+body4_repeated=4
+donor_exact=1
+source_exact=72
+source_single_to_pair=7
+missing_count=0
