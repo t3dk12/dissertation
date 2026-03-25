@@ -1,0 +1,4 @@
+.DS_Store
+
+data/Li-metal_OUTCARs/*
+!data/Li-metal_OUTCARs/README.md
