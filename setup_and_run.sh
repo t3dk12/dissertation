@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETUP_SCRIPT="${ROOT_DIR}/setup.sh"
+ENV_NAME="${ENV_NAME:-li-model}"
 
 if [[ ! -x "${SETUP_SCRIPT}" ]]; then
   echo "Error: setup script not found or not executable: ${SETUP_SCRIPT}"
@@ -17,14 +18,11 @@ fi
 echo "[1/4] Running setup..."
 "${SETUP_SCRIPT}"
 
-echo "[2/4] Activating li-model..."
-eval "$(conda shell.bash hook)"
-# Some conda activation scripts reference optional vars that may be unset.
-# Guard this Qt variable and temporarily relax nounset during activation.
-export QT_XCB_GL_INTEGRATION="${QT_XCB_GL_INTEGRATION:-}"
-set +u
-conda activate li-model
-set -u
+run_in_env() {
+  conda run -n "${ENV_NAME}" "$@"
+}
+
+echo "[2/4] Using ${ENV_NAME} via conda run..."
 
 BUILD_INPUT_DIR="${BUILD_INPUT_DIR:-data/Li-metal_OUTCARs}"
 BUILD_OUTPUT_DIR="${BUILD_OUTPUT_DIR:-data/traj}"
@@ -71,7 +69,7 @@ dataset_has_small_cells() {
   local train_dir="${ROOT_DIR}/${BUILD_OUTPUT_DIR}/train"
   local test_dir="${ROOT_DIR}/${BUILD_OUTPUT_DIR}/test"
 
-  python - <<PY
+  run_in_env python - <<PY
 import json
 import numpy as np
 from pathlib import Path
@@ -133,7 +131,7 @@ if is_dataset_ready; then
   if dataset_has_small_cells; then
     echo "[3/4] Existing dataset has cells below 2*rcut. Rebuilding dataset..."
     rm -rf "${ROOT_DIR}/${BUILD_OUTPUT_DIR}"
-    python "${ROOT_DIR}/run_scripts/build_dataset_duplicate.py" \
+    run_in_env python "${ROOT_DIR}/run_scripts/build_dataset_duplicate.py" \
       --input_dir "${ROOT_DIR}/${BUILD_INPUT_DIR}" \
       --output_dir "${ROOT_DIR}/${BUILD_OUTPUT_DIR}" \
       --duplicate "${BUILD_DUPLICATE}" \
@@ -145,7 +143,7 @@ if is_dataset_ready; then
   fi
 else
   echo "[3/4] Running dataset build..."
-  python "${ROOT_DIR}/run_scripts/build_dataset_duplicate.py" \
+  run_in_env python "${ROOT_DIR}/run_scripts/build_dataset_duplicate.py" \
     --input_dir "${ROOT_DIR}/${BUILD_INPUT_DIR}" \
     --output_dir "${ROOT_DIR}/${BUILD_OUTPUT_DIR}" \
     --duplicate "${BUILD_DUPLICATE}" \
@@ -158,7 +156,7 @@ if is_training_complete; then
   echo "[4/4] Training already appears complete. Skipping training."
 else
   echo "[4/4] Running training..."
-  python "${ROOT_DIR}/run_scripts/train_without_force_Li_NN.py" \
+  run_in_env python "${ROOT_DIR}/run_scripts/train_without_force_Li_NN.py" \
     --train_dir "${ROOT_DIR}/${TRAIN_DIR}" \
     --ffield "${ROOT_DIR}/${TRAIN_FFIELD}" \
     --s "${TRAIN_STEPS}" \
