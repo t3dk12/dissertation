@@ -103,19 +103,26 @@ def process_single_folder(folder: Path, input_dir: Path, output_dir: Path, unuse
         print(f"Failed to read {base_filename} -> copied original to unused_data as {failed_filename}")
         return base_filename, status_info
 
-    # If enlargement is enabled, calculate box widths and compare to required minimum width
+    # If enlargement is enabled, calculate box widths over all frames and compare to required minimum width
     if enlarge_small_boxes:
-        last_frame = trajectory_frames[-1]
-        cell = last_frame.get_cell()
-        volume = cell.volume
+        repetitions_needed = [1, 1, 1]
 
-        # Calculate widths in each direction
-        cell_widths = [
-            volume / np.linalg.norm(np.cross(cell[1], cell[2])),
-            volume / np.linalg.norm(np.cross(cell[2], cell[0])),
-            volume / np.linalg.norm(np.cross(cell[0], cell[1])),
-        ]
-        repetitions_needed = [int(np.ceil(minimum_box_width / width)) for width in cell_widths]
+        for frame in trajectory_frames:
+            cell = frame.get_cell()
+            volume = cell.volume
+
+            # Calculate widths in each direction
+            cell_widths = [
+                volume / np.linalg.norm(np.cross(cell[1], cell[2])),
+                volume / np.linalg.norm(np.cross(cell[2], cell[0])),
+                volume / np.linalg.norm(np.cross(cell[0], cell[1])),
+            ]
+            frame_repetitions = [int(np.ceil(minimum_box_width / width)) for width in cell_widths]
+            repetitions_needed = [
+                max(repetitions_needed[0], frame_repetitions[0]),
+                max(repetitions_needed[1], frame_repetitions[1]),
+                max(repetitions_needed[2], frame_repetitions[2]),
+            ]
 
         # Duplicate frames if any direction is too small
         if any(r > 1 for r in repetitions_needed):
@@ -403,9 +410,9 @@ def main():
     parser.add_argument("--csv_name", type=str, default="dft_summary.csv", help="Name of summary CSV file.")
     parser.add_argument("--split_ratio", type=float, default=0.10, help="Fraction of data for test set.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for splitting.")
-    parser.add_argument("--duplicate", type=int, choices=[1, 0], default=0, help="Enable enlargement of small boxes (1=on, 0=off).")
+    parser.add_argument("--duplicate", type=int, choices=[1, 0], default=1, help="Enable enlargement of small boxes (1=on, 0=off).")
     parser.add_argument("--ffield", type=Path, default=Path("ffield.json"), help="Path to ffield.json to read rcut.")
-    parser.add_argument("--cutoff", type=float, default=4.0, help="Fallback cutoff if ffield.json missing or unreadable.")
+    parser.add_argument("--cutoff", type=float, default=5.0, help="Fallback cutoff if ffield.json missing or unreadable.")
     
     # New Multiprocessing Argument
     parser.add_argument("--workers", type=int, default=multiprocessing.cpu_count(), help="Number of CPU cores to use for reading data (defaults to all cores).")

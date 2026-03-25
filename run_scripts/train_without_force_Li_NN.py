@@ -126,10 +126,20 @@ if __name__ == '__main__':
               )
     # Execution / Training Loop
     print(f"Starting MPNN training for {args.step} iterations with learning rate {args.lr}...") 
-    rn.run(learning_rate=args.lr, 
-           step=args.step, 
-           print_step=args.pr, 
-           writelib=args.writelib)
+    try:
+        rn.run(learning_rate=args.lr, 
+               step=args.step, 
+               print_step=args.pr, 
+               writelib=args.writelib)
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "cell length must lager than 2.0*r_cut" in msg:
+            raise RuntimeError(
+                msg
+                + "\nHint: rebuild dataset with duplication enabled, e.g. "
+                  "`bash setup_and_run.sh` (it now auto-checks undersized cells)."
+            ) from exc
+        raise
 
     print("Training complete. Force field saved.")
 

@@ -19,12 +19,17 @@ echo "[1/4] Running setup..."
 
 echo "[2/4] Activating li-model..."
 eval "$(conda shell.bash hook)"
+# Some conda activation scripts reference optional vars that may be unset.
+# Temporarily relax nounset to avoid aborting under `set -u`.
+set +u
 conda activate li-model
+set -u
 
 BUILD_INPUT_DIR="${BUILD_INPUT_DIR:-data/Li-metal_OUTCARs}"
 BUILD_OUTPUT_DIR="${BUILD_OUTPUT_DIR:-data/traj}"
 BUILD_DUPLICATE="${BUILD_DUPLICATE:-1}"
 BUILD_FFIELD="${BUILD_FFIELD:-ffield.json}"
+BUILD_CUTOFF="${BUILD_CUTOFF:-5.0}"
 BUILD_WORKERS="${BUILD_WORKERS:-4}"
 
 TRAIN_DIR="${TRAIN_DIR:-data/traj/train}"
@@ -61,6 +66,59 @@ is_dataset_ready() {
   return 1
 }
 
+dataset_has_small_cells() {
+  local train_dir="${ROOT_DIR}/${BUILD_OUTPUT_DIR}/train"
+  local test_dir="${ROOT_DIR}/${BUILD_OUTPUT_DIR}/test"
+
+  python - <<PY
+import json
+import numpy as np
+from pathlib import Path
+from ase.io import read
+
+root = Path(r"${ROOT_DIR}")
+train_dir = Path(r"${train_dir}")
+test_dir = Path(r"${test_dir}")
+ffield = root / "${BUILD_FFIELD}"
+cutoff = float("${BUILD_CUTOFF}")
+
+if ffield.exists():
+    try:
+        data = json.loads(ffield.read_text())
+        rcut = data.get("rcut", cutoff)
+        if isinstance(rcut, dict):
+            cutoff = max(float(v) for v in rcut.values())
+        else:
+            cutoff = float(rcut)
+    except Exception:
+        pass
+
+minimum_box_width = 2.0 * cutoff
+
+for split_dir in (train_dir, test_dir):
+    if not split_dir.exists():
+        continue
+    for traj_path in split_dir.rglob("*.traj"):
+        frames = read(str(traj_path), index=":")
+        if not isinstance(frames, list):
+            frames = [frames]
+
+        for frame in frames:
+            cell = frame.get_cell()
+            volume = cell.volume
+            widths = [
+                volume / np.linalg.norm(np.cross(cell[1], cell[2])),
+                volume / np.linalg.norm(np.cross(cell[2], cell[0])),
+                volume / np.linalg.norm(np.cross(cell[0], cell[1])),
+            ]
+            if any(width < minimum_box_width for width in widths):
+                print(f"Found undersized cell in: {traj_path}")
+                raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+}
+
 is_training_complete() {
   local training_log="${ROOT_DIR}/training.log"
 
@@ -71,7 +129,19 @@ is_training_complete() {
 }
 
 if is_dataset_ready; then
-  echo "[3/4] Dataset already built. Skipping dataset build."
+  if dataset_has_small_cells; then
+    echo "[3/4] Existing dataset has cells below 2*rcut. Rebuilding dataset..."
+    rm -rf "${ROOT_DIR}/${BUILD_OUTPUT_DIR}"
+    python "${ROOT_DIR}/run_scripts/build_dataset_duplicate.py" \
+      --input_dir "${ROOT_DIR}/${BUILD_INPUT_DIR}" \
+      --output_dir "${ROOT_DIR}/${BUILD_OUTPUT_DIR}" \
+      --duplicate "${BUILD_DUPLICATE}" \
+      --ffield "${ROOT_DIR}/${BUILD_FFIELD}" \
+      --cutoff "${BUILD_CUTOFF}" \
+      --workers "${BUILD_WORKERS}"
+  else
+    echo "[3/4] Dataset already built. Skipping dataset build."
+  fi
 else
   echo "[3/4] Running dataset build..."
   python "${ROOT_DIR}/run_scripts/build_dataset_duplicate.py" \
@@ -79,6 +149,7 @@ else
     --output_dir "${ROOT_DIR}/${BUILD_OUTPUT_DIR}" \
     --duplicate "${BUILD_DUPLICATE}" \
     --ffield "${ROOT_DIR}/${BUILD_FFIELD}" \
+    --cutoff "${BUILD_CUTOFF}" \
     --workers "${BUILD_WORKERS}"
 fi
 
