@@ -1,0 +1,22 @@
+# mac
+.DS_Store
+
+# python build/runtime
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# local training/runtime artifacts
+*.log
+*.traj
+ffield_*
+!tools/ffield_to_json_full.py
+siesta*.out
+
+# keep data out of this code repo by default
+/data/

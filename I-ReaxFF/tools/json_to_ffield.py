@@ -1,30 +1,59 @@
 #!/usr/bin/env python
-from irff.reaxfflib import read_ffield,write_ffield
-from irff.qeq import qeq
-from ase.io import read
-import argh
-import argparse
 import json as js
-from os import environ,system
-import csv
-import pandas as pd
-from os.path import isfile
 
+from irff.reaxfflib import write_ffield
 
 
 def jsontoffield():
-    lf = open('ffield.json','r')
-    j = js.load(lf)
+    with open('ffield.json', 'r') as lf:
+        j = js.load(lf)
     p_ = j['p']
     m_ = j['m']
-    mf_layer  = j['mf_layer']
-    be_layer  = j['be_layer']
-    lf.close()
+    mf_layer = j.get('mf_layer')
+    be_layer = j.get('be_layer')
 
-    spec,bonds,offd,angs,torp,hbs = init_bonds(p_)
-    write_ffield(p_,spec,bonds,offd,angs,torp,hbs,
-                 m=m_,mf_layer=mf_layer,be_layer=be_layer,
-                 libfile='ffield')
+    spec, bonds, offd, angs, torp, hbs = init_bonds(p_)
+
+    # Empty dict means no neural-network payload in many li-style JSONs.
+    if isinstance(m_, dict) and not m_:
+        m_ = None
+        mf_layer = None
+        be_layer = None
+
+    if m_ and spec and not all(f'fmwo_{sp}' in m_ for sp in spec):
+        print(
+            "-  Warning: neural network weights missing expected keys, dropping m/mf_layer/be_layer",
+        )
+        m_ = None
+        mf_layer = None
+        be_layer = None
+    libfile = 'ffield'
+    meta_path = f'{libfile}.meta.json'
+    with open(meta_path, 'w', encoding='utf-8') as mf:
+        js.dump(j, mf, sort_keys=True, indent=2)
+
+    while True:
+        try:
+            write_ffield(
+                p_,
+                spec,
+                bonds,
+                offd,
+                angs,
+                torp,
+                hbs,
+                m=m_,
+                mf_layer=mf_layer,
+                be_layer=be_layer,
+                libfile=libfile,
+            )
+            break
+        except KeyError as exc:
+            missing = exc.args[0]
+            if missing in p_:
+                raise
+            print(f"-  Warning: missing parameter {missing}, defaulting to 0.0")
+            p_[missing] = 0.0
 
 
 def init_bonds(p_):
@@ -53,5 +82,4 @@ def init_bonds(p_):
 
 
 if __name__ == '__main__':
-   jsontoffield()
-
+    jsontoffield()

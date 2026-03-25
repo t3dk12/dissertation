@@ -38,7 +38,7 @@ parser.add_argument('--batch', default=50, type=int, help='Number of molecular c
 parser.add_argument('--ffield', default='ffield.json', type=str, help='Path to the initial ReaxFF/MPNN force-field file.')
 
 # Dataset location
-parser.add_argument('--train_dir', default='traj/train', type=str, help='Directory containing the training .traj files.')
+parser.add_argument('--train_dir', default='data/traj/train', type=str, help='Directory containing the training .traj files.')
 
 # Physics Control Flags (1 = Optimise / 0 = Freeze)
 parser.add_argument('--t', default=1, type=int, help='Toggle for three-body (angle) term optimisation.')
@@ -155,4 +155,3 @@ if __name__ == '__main__':
 #        print_step=args.pr, 
 #        writelib=args.writelib)
 # print("Training complete. Force field saved.")
-

@@ -187,7 +187,8 @@ class MPNN(ReaxFF):
                losFunc='n2',
                conf_vale=None,
                huber_d=30.0,
-               ncpu=None):
+               ncpu=None,
+               link_cache_dir=None):
       '''
          Message Passing Neural network build top on ReaxFF potentail
          version 3.0 
@@ -248,7 +249,8 @@ class MPNN(ReaxFF):
                       optMethod=optMethod,maxstep=maxstep,
                       emse=emse,convergence=convergence,lossConvergence=lossConvergence,
                       losFunc=losFunc,conf_vale=conf_vale,
-                      huber_d=huber_d,ncpu=ncpu)
+                      huber_d=huber_d,ncpu=ncpu,
+                      link_cache_dir=link_cache_dir)
       self.S        = {}
       self.esi      = {}
       self.fbo      = {}

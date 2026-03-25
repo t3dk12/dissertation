@@ -398,8 +398,8 @@ def generate_summary_csv(output_dir: Path, csv_path: Path, file_status_info: dic
 # Main function to parse arguments and run all steps
 def main():
     parser = argparse.ArgumentParser(description="Extract VASP files, optionally enlarge boxes, split, and summarise DFT data.")
-    parser.add_argument("--input_dir", type=Path, default=Path("Li-metal_OUTCARs"), help="VASP output directory.")
-    parser.add_argument("--output_dir", type=Path, default=Path("traj"), help="Folder to store .traj files.")
+    parser.add_argument("--input_dir", type=Path, default=Path("data/Li-metal_OUTCARs"), help="VASP output directory.")
+    parser.add_argument("--output_dir", type=Path, default=Path("data/traj"), help="Folder to store .traj files.")
     parser.add_argument("--csv_name", type=str, default="dft_summary.csv", help="Name of summary CSV file.")
     parser.add_argument("--split_ratio", type=float, default=0.10, help="Fraction of data for test set.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for splitting.")

@@ -37,15 +37,15 @@ fi
 
 if conda run -n "${ENV_NAME}" python -m pip show irff >/dev/null 2>&1; then
   EDITABLE_LOC="$(conda run -n "${ENV_NAME}" python -m pip show irff | awk -F': ' '/Editable project location/ {print $2}')"
-  if [[ "${EDITABLE_LOC}" == "${ROOT_DIR}/I-ReaxFF-clean" ]]; then
-    echo "Editable IRFF already points to ${ROOT_DIR}/I-ReaxFF-clean"
+  if [[ "${EDITABLE_LOC}" == "${ROOT_DIR}/I-ReaxFF" ]]; then
+    echo "Editable IRFF already points to ${ROOT_DIR}/I-ReaxFF"
   else
-    echo "Reinstalling editable IRFF from ${ROOT_DIR}/I-ReaxFF-clean"
-    conda run -n "${ENV_NAME}" pip install -e "${ROOT_DIR}/I-ReaxFF-clean"
+    echo "Reinstalling editable IRFF from ${ROOT_DIR}/I-ReaxFF"
+    conda run -n "${ENV_NAME}" pip install -e "${ROOT_DIR}/I-ReaxFF"
   fi
 else
   echo "Installing editable IRFF..."
-  conda run -n "${ENV_NAME}" pip install -e "${ROOT_DIR}/I-ReaxFF-clean"
+  conda run -n "${ENV_NAME}" pip install -e "${ROOT_DIR}/I-ReaxFF"
 fi
 
 echo "Checking core Python dependencies..."

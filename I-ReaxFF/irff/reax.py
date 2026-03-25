@@ -1,4 +1,7 @@
 import csv
+import hashlib
+import os
+import pickle
 import matplotlib.pyplot as plt
 from os import system,makedirs # , getcwd, chdir,listdir,environ
 from os.path import isfile,exists,isdir
@@ -17,11 +20,26 @@ import tensorflow as tf
 # from tensorflow.contrib.opt import ScipyOptimizerInterface
 import numpy as np
 # import random
-# import pickle
 import json as js
 # tf_upgrade_v2 --infile reax.py --outfile reax_v1.py
 # tf.compat.v1.disable_v2_behavior()
 tf.compat.v1.disable_eager_execution()
+
+import multiprocessing as mp
+
+LINK_CACHE_VERSION = 1
+
+def _parallel_reax_data(args):
+    """Top-level helper to bypass the GIL and load trajectories in parallel."""
+    (mol, direc, atoms, vdwcut, rcut, rcuta, hbshort, hblong, 
+     batch, sample, p_, spec, bonds, angs, tors, nindex) = args
+     
+    data_ = reax_data(structure=mol, direc=direc, atoms=atoms, 
+                      vdwcut=vdwcut, rcut=rcut, rcuta=rcuta, 
+                      hbshort=hbshort, hblong=hblong, batch=batch, 
+                      sample=sample, p=p_, spec=spec, bonds=bonds, 
+                      angs=angs, tors=tors, nindex=nindex)
+    return mol, data_
 
 class Chromosome:
   def __init__(self,genes,loss):
@@ -146,7 +164,8 @@ class ReaxFF(object):
                losFunc='n2',
                conf_vale=None,
                huber_d=30.0,
-               ncpu=None):
+               ncpu=None,
+               link_cache_dir=None):
       '''
            Intelligence ReaxFF Neual Network: Evoluting the Force Field parameters on-the-fly
            2017-11-01
@@ -200,6 +219,7 @@ class ReaxFF(object):
       self.losFunc       = losFunc
       self.huber_d       = huber_d
       self.ncpu          = ncpu
+      self.link_cache_dir = link_cache_dir
       self.bore          = bore
       #self.atol         = atol     # angle bond-order tolerence
       #self.hbtol        = hbtol    # hydrogen-bond bond-order tolerence
@@ -259,6 +279,124 @@ class ReaxFF(object):
       self.rcuta = rcuta_
       self.re = re_
 
+  @staticmethod
+  def _format_elapsed(seconds):
+      seconds = max(0.0, float(seconds))
+      if seconds < 60.0:
+         return '{:.1f}s'.format(seconds)
+      minutes, seconds = divmod(seconds, 60.0)
+      if minutes < 60.0:
+         return '{:d}m {:.1f}s'.format(int(minutes), seconds)
+      hours, minutes = divmod(minutes, 60.0)
+      return '{:d}h {:d}m {:.1f}s'.format(int(hours), int(minutes), seconds)
+
+  def _resolve_link_cache_dir(self):
+      if self.link_cache_dir:
+         return os.path.abspath(self.link_cache_dir)
+
+      dataset_paths = [os.path.abspath(path) for path in self.dataset.values()]
+      if not dataset_paths:
+         return None
+
+      try:
+         common_path = os.path.commonpath(dataset_paths)
+      except ValueError:
+         return None
+
+      if os.path.isfile(common_path):
+         common_path = os.path.dirname(common_path)
+      return os.path.join(common_path, '.irff_cache', 'links')
+
+  def _link_cache_signature(self,molecules):
+      dataset_signature = []
+      for mol in self.dataset:
+         path = os.path.abspath(self.dataset[mol])
+         stat = os.stat(path) if exists(path) else None
+         dataset_signature.append({
+             'mol': mol,
+             'path': path,
+             'size': None if stat is None else stat.st_size,
+             'mtime_ns': None if stat is None else stat.st_mtime_ns,
+             'indexs': [int(index) for index in np.asarray(molecules[mol].indexs).tolist()],
+         })
+
+      libfile_path = os.path.abspath(self.libfile)
+      libfile_stat = os.stat(libfile_path) if exists(libfile_path) else None
+      return {
+          'version': LINK_CACHE_VERSION,
+          'dataset': dataset_signature,
+          'batch': self.batch,
+          'sample': self.sample,
+          'vdwcut': self.vdwcut,
+          'hbshort': self.hbshort,
+          'hblong': self.hblong,
+          'rcut': self.rcut,
+          'rcuta': self.rcuta,
+          'species': self.spec,
+          'bonds': self.bonds,
+          'angs': self.angs,
+          'tors': self.tors,
+          'hbs': self.hbs,
+          'libfile': {
+              'path': libfile_path,
+              'size': None if libfile_stat is None else libfile_stat.st_size,
+              'mtime_ns': None if libfile_stat is None else libfile_stat.st_mtime_ns,
+          },
+      }
+
+  def _link_cache_path(self,molecules):
+      cache_dir = self._resolve_link_cache_dir()
+      if cache_dir is None:
+         return None,None
+      signature = self._link_cache_signature(molecules)
+      cache_key = hashlib.sha256(pickle.dumps(signature,protocol=pickle.HIGHEST_PROTOCOL)).hexdigest()
+      return os.path.join(cache_dir,'links_{:s}.pkl'.format(cache_key)),signature
+
+  def _load_cached_links(self,cache_path):
+      cache_start = time.time()
+      try:
+         with open(cache_path,'rb') as handle:
+            payload = pickle.load(handle)
+      except Exception as exc:
+         print('-  link cache read failed for {:s}: {}'.format(cache_path, exc))
+         return None
+
+      if payload.get('version') != LINK_CACHE_VERSION:
+         print('-  link cache version mismatch, rebuilding links ...')
+         return None
+
+      cached_links = payload.get('links')
+      if cached_links is None:
+         print('-  link cache payload missing links, rebuilding ...')
+         return None
+
+      print('-  link cache hit: {:s} (loaded in {:s})'.format(
+          cache_path,
+          self._format_elapsed(time.time() - cache_start),
+      ))
+      return cached_links
+
+  def _save_cached_links(self,cache_path,signature,link_object):
+      cache_dir = os.path.dirname(cache_path)
+      if not exists(cache_dir):
+         makedirs(cache_dir)
+
+      payload = {
+          'version': LINK_CACHE_VERSION,
+          'signature': signature,
+          'links': link_object,
+      }
+      temp_path = cache_path + '.tmp'
+      try:
+         with open(temp_path,'wb') as handle:
+            pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
+         os.replace(temp_path, cache_path)
+         print('-  link cache saved: {:s}'.format(cache_path))
+      except Exception as exc:
+         print('-  link cache save failed for {:s}: {}'.format(cache_path, exc))
+         if exists(temp_path):
+            os.remove(temp_path)
+
   def initialize(self): 
       self.nframe = 0
       molecules   = {}
@@ -269,41 +407,73 @@ class ReaxFF(object):
       self.mols   = []
       self.eself,self.evdw_,self.ecoul_ = {},{},{}
 
-      for mol in self.dataset: 
-          nindex = []
-          for key in molecules:
-              if self.dataset[key]==self.dataset[mol]:
-                 nindex.extend(molecules[key].indexs) 
-          data_ = reax_data(structure=mol,
-                                direc=self.dataset[mol],
-                                atoms=self.atoms,
-                               vdwcut=self.vdwcut,
-                                 rcut=self.rcut,
-                                rcuta=self.rcuta,
-                              hbshort=self.hbshort,
-                               hblong=self.hblong,
-                                batch=self.batch,
-                               sample=self.sample,
-                       p=self.p_,spec=self.spec,bonds=self.bonds,
-                  angs=self.angs,tors=self.tors,
-                               nindex=nindex)
 
-          if data_.status:
-             self.mols.append(mol)
-             molecules[mol]  = data_
-             self.nframe    += self.batch
-             print('-  max energy of %s: %f.' %(mol,molecules[mol].max_e))
-             self.max_e[mol] = molecules[mol].max_e
+      task_arguments = []
+      for mol in self.dataset:
+         nindex = []
+         for key in molecules:
+            if self.dataset[key]==self.dataset[mol]:
+               nindex.extend(molecules[key].indexs)
+                    
+         task_args = (mol, self.dataset[mol], self.atoms, self.vdwcut, 
+                      self.rcut, self.rcuta, self.hbshort, self.hblong, 
+                      self.batch, self.sample, self.p_, self.spec, 
+                      self.bonds, self.angs, self.tors, nindex
+                      )
+         task_arguments.append(task_args)
+         
+      ncores = mp.cpu_count()
+      print(f"- launching multiprocessing pool on {ncores} cores...")
+      with mp.Pool(processes=ncores) as pool:
+         results = pool.map(_parallel_reax_data, task_arguments)
 
-             # self.evdw_[mol]= molecules[mol].evdw
-             self.ecoul_[mol] = molecules[mol].ecoul  
+      for mol, data_ in results:
+         if data_.status:
+            self.mols.append(mol)
+            molecules[mol] = data_
+            self.nframe += self.batch
+            print('- max energy of %s: %f.' %(mol, molecules[mol].max_e))
+            self.max_e[mol] = molecules[mol].max_e
+            self.ecoul_[mol] = molecules[mol].ecoul
+            self.eself[mol] = molecules[mol].eself
+         else:
+            print('- data status of %s:' %mol, data_.status)
+
+      # for mol in self.dataset: 
+      #     nindex = []
+      #     for key in molecules:
+      #         if self.dataset[key]==self.dataset[mol]:
+      #            nindex.extend(molecules[key].indexs) 
+      #     data_ = reax_data(structure=mol,
+      #                           direc=self.dataset[mol],
+      #                           atoms=self.atoms,
+      #                          vdwcut=self.vdwcut,
+      #                            rcut=self.rcut,
+      #                           rcuta=self.rcuta,
+      #                         hbshort=self.hbshort,
+      #                          hblong=self.hblong,
+      #                           batch=self.batch,
+      #                          sample=self.sample,
+      #                  p=self.p_,spec=self.spec,bonds=self.bonds,
+      #             angs=self.angs,tors=self.tors,
+      #                          nindex=nindex)
+
+      #     if data_.status:
+      #        self.mols.append(mol)
+      #        molecules[mol]  = data_
+      #        self.nframe    += self.batch
+      #        print('-  max energy of %s: %f.' %(mol,molecules[mol].max_e))
+      #        self.max_e[mol] = molecules[mol].max_e
+
+      #        # self.evdw_[mol]= molecules[mol].evdw
+      #        self.ecoul_[mol] = molecules[mol].ecoul  
                   
-             self.eself[mol] = molecules[mol].eself    
-             # self.nbe0[mol]= molecules[mol].nbe0   
-             # self.cell[mol]  = molecules[mol].cell
-             # self.bf[mol]    = tf.constant(molecules[mol].bf,dtype=tf.float32)
-          else:
-             print('-  data status of %s:' %mol,data_.status)
+      #        self.eself[mol] = molecules[mol].eself    
+      #        # self.nbe0[mol]= molecules[mol].nbe0   
+      #        # self.cell[mol]  = molecules[mol].cell
+      #        # self.bf[mol]    = tf.constant(molecules[mol].bf,dtype=tf.float32)
+      #     else:
+      #        print('-  data status of %s:' %mol,data_.status)
       self.nmol = len(molecules)
 
       if self.data_invariant:
@@ -327,14 +497,7 @@ class ReaxFF(object):
       self.initialized = True
       return molecules
 
-  def get_links(self,molecules):
-      self.lk = links(species=self.spec,
-                        bonds=self.bonds,
-                         angs=self.angs,
-                         tors=self.tors,
-                          hbs=self.hbs,
-                       vdwcut=self.vdwcut,
-                    molecules=molecules)
+  def _apply_link_fields(self):
       self.dlist    = self.lk.dlist
       self.dilink   = self.lk.dilink
       self.djlink   = self.lk.djlink
@@ -371,6 +534,32 @@ class ReaxFF(object):
       self.hij      = self.lk.hij
       self.vi       = self.lk.vi
       self.vj       = self.lk.vj
+
+  def get_links(self,molecules):
+      cache_path,signature = self._link_cache_path(molecules)
+      total_start = time.time()
+      self.lk = None
+
+      if cache_path is not None and exists(cache_path):
+         self.lk = self._load_cached_links(cache_path)
+      elif cache_path is not None:
+         print('-  link cache miss: {:s}'.format(cache_path))
+
+      if self.lk is None:
+         build_start = time.time()
+         self.lk = links(species=self.spec,
+                           bonds=self.bonds,
+                            angs=self.angs,
+                            tors=self.tors,
+                             hbs=self.hbs,
+                          vdwcut=self.vdwcut,
+                       molecules=molecules)
+         print('-  link build complete in {:s}'.format(self._format_elapsed(time.time() - build_start)))
+         if cache_path is not None and signature is not None:
+            self._save_cached_links(cache_path, signature, self.lk)
+
+      self._apply_link_fields()
+      print('-  link stage ready in {:s}'.format(self._format_elapsed(time.time() - total_start)))
 
   def memory(self):
       self.frc = {}
