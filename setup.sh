@@ -59,7 +59,13 @@ install_if_missing "cython"
 if [[ "${KERNEL}" == "Darwin" ]]; then
   echo "Checking macOS TensorFlow stack..."
   install_if_missing "tensorflow"
-  install_if_missing "tensorflow-metal"
+  if [[ "${ENABLE_TF_METAL:-0}" == "1" ]]; then
+    echo "ENABLE_TF_METAL=1 detected. Installing tensorflow-metal..."
+    install_if_missing "tensorflow-metal"
+  else
+    echo "Skipping tensorflow-metal by default on macOS."
+    echo "Set ENABLE_TF_METAL=1 if you want to try Apple GPU support later."
+  fi
 elif [[ "${KERNEL}" == "Linux" ]]; then
   if command -v nvidia-smi >/dev/null 2>&1; then
     if have_pip_pkg "tensorflow" && have_pip_pkg "nvidia-cublas-cu12"; then
