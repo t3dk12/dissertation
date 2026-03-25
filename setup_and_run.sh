@@ -20,7 +20,8 @@ echo "[1/4] Running setup..."
 echo "[2/4] Activating li-model..."
 eval "$(conda shell.bash hook)"
 # Some conda activation scripts reference optional vars that may be unset.
-# Temporarily relax nounset to avoid aborting under `set -u`.
+# Guard this Qt variable and temporarily relax nounset during activation.
+export QT_XCB_GL_INTEGRATION="${QT_XCB_GL_INTEGRATION:-}"
 set +u
 conda activate li-model
 set -u
