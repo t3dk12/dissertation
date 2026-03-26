@@ -1,4 +1,5 @@
 .DS_Store
+**/.irff_cache/
 
 data/Li-metal_OUTCARs/*
 !data/Li-metal_OUTCARs/README.md
