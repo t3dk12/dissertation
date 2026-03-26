@@ -2,7 +2,6 @@ import csv
 import hashlib
 import os
 import pickle
-import sys
 import matplotlib.pyplot as plt
 from os import system,makedirs # , getcwd, chdir,listdir,environ
 from os.path import isfile,exists,isdir
@@ -27,7 +26,6 @@ import json as js
 tf.compat.v1.disable_eager_execution()
 
 import multiprocessing as mp
-from multiprocessing.pool import ThreadPool
 
 LINK_CACHE_VERSION = 1
 
@@ -425,25 +423,11 @@ class ReaxFF(object):
          task_arguments.append(task_args)
          
       ncores = mp.cpu_count()
-      if sys.platform.startswith('linux'):
-         # Large reax_data objects can stall or fail while being sent back from
-         # worker processes on Linux. Keep the objects in one process instead.
-         pool_factory = ThreadPool
-         pool_label = 'threads'
-      else:
-         pool_factory = mp.Pool
-         pool_label = 'processes'
+      print(f"- launching multiprocessing pool on {ncores} cores...")
+      with mp.Pool(processes=ncores) as pool:
+         results = pool.map(_parallel_reax_data, task_arguments)
 
-      print(f"- launching dataset loader on {ncores} {pool_label}...")
-      results_by_mol = {}
-      with pool_factory(processes=ncores) as pool:
-         for mol, data_ in pool.imap_unordered(_parallel_reax_data, task_arguments):
-            results_by_mol[mol] = data_
-            print('-  collected dataset {:d}/{:d}: {:s}'.format(
-                len(results_by_mol), len(task_arguments), mol))
-
-      for mol in self.dataset:
-         data_ = results_by_mol[mol]
+      for mol, data_ in results:
          if data_.status:
             self.mols.append(mol)
             molecules[mol] = data_
