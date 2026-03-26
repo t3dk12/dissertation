@@ -2,6 +2,7 @@ import csv
 import hashlib
 import os
 import pickle
+import sys
 import matplotlib.pyplot as plt
 from os import system,makedirs # , getcwd, chdir,listdir,environ
 from os.path import isfile,exists,isdir
@@ -423,11 +424,25 @@ class ReaxFF(object):
          task_arguments.append(task_args)
          
       ncores = mp.cpu_count()
-      print(f"- launching multiprocessing pool on {ncores} cores...")
-      with mp.Pool(processes=ncores) as pool:
-         results = pool.map(_parallel_reax_data, task_arguments)
+      if sys.platform.startswith('linux'):
+         # TensorFlow is imported before dataset loading, so avoid forking the
+         # current process on Linux where fork can deadlock silently.
+         ctx = mp.get_context('spawn')
+         start_method = 'spawn'
+      else:
+         ctx = mp
+         start_method = mp.get_start_method()
 
-      for mol, data_ in results:
+      print(f"- launching multiprocessing pool on {ncores} cores ({start_method})...")
+      results_by_mol = {}
+      with ctx.Pool(processes=ncores) as pool:
+         for mol, data_ in pool.imap_unordered(_parallel_reax_data, task_arguments):
+            results_by_mol[mol] = data_
+            print('-  collected dataset {:d}/{:d}: {:s}'.format(
+                len(results_by_mol), len(task_arguments), mol))
+
+      for mol in self.dataset:
+         data_ = results_by_mol[mol]
          if data_.status:
             self.mols.append(mol)
             molecules[mol] = data_
