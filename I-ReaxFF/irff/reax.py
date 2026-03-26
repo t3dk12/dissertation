@@ -2,9 +2,6 @@ import csv
 import hashlib
 import os
 import pickle
-import queue as queue_module
-import shutil
-import traceback
 import matplotlib.pyplot as plt
 from os import system,makedirs # , getcwd, chdir,listdir,environ
 from os.path import isfile,exists,isdir
@@ -32,72 +29,17 @@ import multiprocessing as mp
 
 LINK_CACHE_VERSION = 1
 
-def _dump_pickle_atomic(path, obj):
-    temp_path = path + '.tmp'
-    with open(temp_path, 'wb') as handle:
-        pickle.dump(obj, handle, protocol=pickle.HIGHEST_PROTOCOL)
-    os.replace(temp_path, path)
-
-
 def _parallel_reax_data(args):
-    (mol, direc, atoms, vdwcut, rcut, rcuta, hbshort, hblong,
+    """Top-level helper to bypass the GIL and load trajectories in parallel."""
+    (mol, direc, atoms, vdwcut, rcut, rcuta, hbshort, hblong, 
      batch, sample, p_, spec, bonds, angs, tors, nindex) = args
-
-    return reax_data(structure=mol, direc=direc, atoms=atoms,
-                     vdwcut=vdwcut, rcut=rcut, rcuta=rcuta,
-                     hbshort=hbshort, hblong=hblong, batch=batch,
-                     sample=sample, p=p_, spec=spec, bonds=bonds,
-                     angs=angs, tors=tors, nindex=nindex)
-
-
-def _parallel_reax_data_worker(task, result_queue):
-    start = time.time()
-    result = {
-        'mol': task['mol'],
-        'source_path': task['source_path'],
-        'status': False,
-        'elapsed': 0.0,
-        'payload_path': None,
-        'indexs': [],
-        'failure_mode': None,
-        'message': None,
-    }
-
-    try:
-        data_ = _parallel_reax_data((
-            task['mol'],
-            task['source_path'],
-            task['atoms'],
-            task['vdwcut'],
-            task['rcut'],
-            task['rcuta'],
-            task['hbshort'],
-            task['hblong'],
-            task['batch'],
-            task['sample'],
-            task['p_'],
-            task['spec'],
-            task['bonds'],
-            task['angs'],
-            task['tors'],
-            task.get('nindex', []),
-        ))
-        result['elapsed'] = time.time() - start
-        if data_.status:
-            _dump_pickle_atomic(task['payload_path'], data_)
-            result['status'] = True
-            result['payload_path'] = task['payload_path']
-            result['indexs'] = [int(index) for index in np.asarray(data_.indexs).reshape(-1).tolist()]
-        else:
-            result['failure_mode'] = 'load_error'
-            result['message'] = 'data status was False'
-    except Exception as exc:
-        result['elapsed'] = time.time() - start
-        result['failure_mode'] = 'load_error'
-        result['message'] = repr(exc)
-        result['traceback'] = traceback.format_exc()
-
-    result_queue.put(result)
+     
+    data_ = reax_data(structure=mol, direc=direc, atoms=atoms, 
+                      vdwcut=vdwcut, rcut=rcut, rcuta=rcuta, 
+                      hbshort=hbshort, hblong=hblong, batch=batch, 
+                      sample=sample, p=p_, spec=spec, bonds=bonds, 
+                      angs=angs, tors=tors, nindex=nindex)
+    return mol, data_
 
 class Chromosome:
   def __init__(self,genes,loss):
@@ -223,11 +165,7 @@ class ReaxFF(object):
                conf_vale=None,
                huber_d=30.0,
                ncpu=None,
-               link_cache_dir=None,
-               loader_workers=None,
-               loader_timeout_seconds=900,
-               loader_quarantine_dir=None,
-               loader_log_file=None):
+               link_cache_dir=None):
       '''
            Intelligence ReaxFF Neual Network: Evoluting the Force Field parameters on-the-fly
            2017-11-01
@@ -282,10 +220,6 @@ class ReaxFF(object):
       self.huber_d       = huber_d
       self.ncpu          = ncpu
       self.link_cache_dir = link_cache_dir
-      self.loader_workers = loader_workers
-      self.loader_timeout_seconds = loader_timeout_seconds
-      self.loader_quarantine_dir = loader_quarantine_dir
-      self.loader_log_file = loader_log_file
       self.bore          = bore
       #self.atol         = atol     # angle bond-order tolerence
       #self.hbtol        = hbtol    # hydrogen-bond bond-order tolerence
@@ -375,7 +309,7 @@ class ReaxFF(object):
 
   def _link_cache_signature(self,molecules):
       dataset_signature = []
-      for mol in molecules:
+      for mol in self.dataset:
          path = os.path.abspath(self.dataset[mol])
          stat = os.stat(path) if exists(path) else None
          dataset_signature.append({
@@ -463,354 +397,84 @@ class ReaxFF(object):
          if exists(temp_path):
             os.remove(temp_path)
 
-  def _resolve_loader_workers(self):
-      if self.loader_workers is not None:
-         return max(1, int(self.loader_workers))
-      if self.ncpu is not None:
-         return max(1, int(self.ncpu))
-      return max(1, int(mp.cpu_count()))
-
-  def _dataset_common_dir(self):
-      dataset_paths = [os.path.abspath(path) for path in self.dataset.values()]
-      if not dataset_paths:
-         return None
-
-      try:
-         common_path = os.path.commonpath(dataset_paths)
-      except ValueError:
-         return None
-
-      if isfile(common_path):
-         common_path = os.path.dirname(common_path)
-      return common_path
-
-  def _resolve_loader_root(self):
-      common_dir = self._dataset_common_dir()
-      if common_dir is None:
-         return None
-      if os.path.basename(common_dir) == 'train':
-         return os.path.dirname(common_dir)
-      return common_dir
-
-  def _resolve_loader_cache_dir(self):
-      loader_root = self._resolve_loader_root()
-      if loader_root is None:
-         return None
-      return os.path.join(loader_root, '.irff_cache', 'loader')
-
-  def _resolve_loader_quarantine_dir(self):
-      if self.loader_quarantine_dir:
-         return os.path.abspath(self.loader_quarantine_dir)
-
-      loader_root = self._resolve_loader_root()
-      if loader_root is None:
-         return None
-      return os.path.join(loader_root, 'quarantine')
-
-  def _resolve_loader_log_file(self, loader_cache_dir=None):
-      if self.loader_log_file:
-         return os.path.abspath(self.loader_log_file)
-
-      cache_dir = loader_cache_dir if loader_cache_dir is not None else self._resolve_loader_cache_dir()
-      if cache_dir is None:
-         return None
-      return os.path.join(cache_dir, 'loader.log')
-
-  @staticmethod
-  def _sanitize_loader_name(name):
-      return ''.join(ch if ch.isalnum() or ch in ('-', '_', '.') else '_' for ch in name)
-
-  def _build_loader_payload_path(self, loader_cache_dir, order, mol, run_token):
-      safe_name = self._sanitize_loader_name(mol)
-      return os.path.join(loader_cache_dir, '{:s}_{:04d}_{:s}.pkl'.format(run_token, order, safe_name))
-
-  def _append_loader_log(self, log_file, failure_mode, mol, source_path,
-                         elapsed=None, quarantine_path=None, message=None):
-      if log_file is None:
-         return
-
-      log_dir = os.path.dirname(log_file)
-      if log_dir and not exists(log_dir):
-         makedirs(log_dir)
-
-      payload = {
-          'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
-          'failure_mode': failure_mode,
-          'mol': mol,
-          'source_path': source_path,
-          'elapsed_seconds': None if elapsed is None else round(float(elapsed), 3),
-          'quarantine_path': quarantine_path,
-          'message': message,
-      }
-      with open(log_file, 'a') as handle:
-         handle.write(js.dumps(payload, sort_keys=True) + '\n')
-
-  @staticmethod
-  def _unique_quarantine_path(source_path, quarantine_dir):
-      base = os.path.basename(source_path)
-      stem, ext = os.path.splitext(base)
-      candidate = os.path.join(quarantine_dir, base)
-      if not exists(candidate):
-         return candidate
-
-      stamp = time.strftime('%Y%m%dT%H%M%S')
-      suffix = 1
-      while True:
-         candidate = os.path.join(quarantine_dir, '{:s}_{:s}_{:d}{:s}'.format(stem, stamp, suffix, ext))
-         if not exists(candidate):
-            return candidate
-         suffix += 1
-
-  def _quarantine_dataset_file(self, source_path, quarantine_dir, log_file,
-                               failure_mode, mol, elapsed=None, message=None):
-      quarantine_path = None
-      log_message = message
-
-      if source_path and exists(source_path) and quarantine_dir is not None:
-         if not exists(quarantine_dir):
-            makedirs(quarantine_dir)
-         target_path = self._unique_quarantine_path(source_path, quarantine_dir)
-         try:
-            shutil.move(source_path, target_path)
-            quarantine_path = target_path
-            print('-  loader: quarantined {:s} -> {:s} ({:s})'.format(source_path, quarantine_path, failure_mode))
-         except Exception as exc:
-            quarantine_path = None
-            if log_message:
-               log_message = '{:s}; quarantine move failed: {!r}'.format(log_message, exc)
-            else:
-               log_message = 'quarantine move failed: {!r}'.format(exc)
-            print('-  loader: failed to quarantine {:s}: {!r}'.format(source_path, exc))
-
-      self._append_loader_log(log_file=log_file,
-                              failure_mode=failure_mode,
-                              mol=mol,
-                              source_path=source_path,
-                              elapsed=elapsed,
-                              quarantine_path=quarantine_path,
-                              message=log_message)
-      return quarantine_path
-
   def initialize(self): 
       self.nframe = 0
       molecules   = {}
       self.max_e  = {}
+      # self.cell   = {}
+      # self.bf     = {}
+      # self.nbe0   = {}
       self.mols   = []
       self.eself,self.evdw_,self.ecoul_ = {},{},{}
 
-      dataset_items = []
-      for order, mol in enumerate(self.dataset):
-         dataset_items.append((order, mol, os.path.abspath(self.dataset[mol])))
 
-      counts = {'loaded': 0, 'quarantined': 0, 'failed': 0, 'skipped': 0}
-      loader_cache_dir = self._resolve_loader_cache_dir()
-      if loader_cache_dir is None:
-         loader_cache_dir = os.path.abspath(os.path.join(os.getcwd(), '.irff_cache', 'loader'))
-      if not exists(loader_cache_dir):
-         makedirs(loader_cache_dir)
-      loader_log_file = self._resolve_loader_log_file(loader_cache_dir)
-      quarantine_dir = self._resolve_loader_quarantine_dir()
-      worker_limit = self._resolve_loader_workers()
-      timeout_seconds = max(1.0, float(self.loader_timeout_seconds))
-      run_token = '{:d}_{:d}'.format(os.getpid(), int(time.time()))
+      task_arguments = []
+      for mol in self.dataset:
+         nindex = []
+         for key in molecules:
+            if self.dataset[key]==self.dataset[mol]:
+               nindex.extend(molecules[key].indexs)
+                    
+         task_args = (mol, self.dataset[mol], self.atoms, self.vdwcut, 
+                      self.rcut, self.rcuta, self.hbshort, self.hblong, 
+                      self.batch, self.sample, self.p_, self.spec, 
+                      self.bonds, self.angs, self.tors, nindex
+                      )
+         task_arguments.append(task_args)
+         
+      ncores = mp.cpu_count()
+      print(f"- launching multiprocessing pool on {ncores} cores...")
+      with mp.Pool(processes=ncores) as pool:
+         results = pool.map(_parallel_reax_data, task_arguments)
 
-      successful = {}
+      for mol, data_ in results:
+         if data_.status:
+            self.mols.append(mol)
+            molecules[mol] = data_
+            self.nframe += self.batch
+            print('- max energy of %s: %f.' %(mol, molecules[mol].max_e))
+            self.max_e[mol] = molecules[mol].max_e
+            self.ecoul_[mol] = molecules[mol].ecoul
+            self.eself[mol] = molecules[mol].eself
+         else:
+            print('- data status of %s:' %mol, data_.status)
 
-      if dataset_items:
-         print('-  loader: starting {:d} dataset files with up to {:d} workers (timeout {:s} per file) ...'.format(
-             len(dataset_items), worker_limit, self._format_elapsed(timeout_seconds)))
+      # for mol in self.dataset: 
+      #     nindex = []
+      #     for key in molecules:
+      #         if self.dataset[key]==self.dataset[mol]:
+      #            nindex.extend(molecules[key].indexs) 
+      #     data_ = reax_data(structure=mol,
+      #                           direc=self.dataset[mol],
+      #                           atoms=self.atoms,
+      #                          vdwcut=self.vdwcut,
+      #                            rcut=self.rcut,
+      #                           rcuta=self.rcuta,
+      #                         hbshort=self.hbshort,
+      #                          hblong=self.hblong,
+      #                           batch=self.batch,
+      #                          sample=self.sample,
+      #                  p=self.p_,spec=self.spec,bonds=self.bonds,
+      #             angs=self.angs,tors=self.tors,
+      #                          nindex=nindex)
 
-         tasks_by_path = {}
-         for order, mol, source_path in dataset_items:
-            task = {
-                'order': order,
-                'mol': mol,
-                'source_path': source_path,
-                'atoms': self.atoms,
-                'vdwcut': self.vdwcut,
-                'rcut': self.rcut,
-                'rcuta': self.rcuta,
-                'hbshort': self.hbshort,
-                'hblong': self.hblong,
-                'batch': self.batch,
-                'sample': self.sample,
-                'p_': self.p_,
-                'spec': self.spec,
-                'bonds': self.bonds,
-                'angs': self.angs,
-                'tors': self.tors,
-                'payload_path': self._build_loader_payload_path(loader_cache_dir, order, mol, run_token),
-            }
-            tasks_by_path.setdefault(source_path, []).append(task)
+      #     if data_.status:
+      #        self.mols.append(mol)
+      #        molecules[mol]  = data_
+      #        self.nframe    += self.batch
+      #        print('-  max energy of %s: %f.' %(mol,molecules[mol].max_e))
+      #        self.max_e[mol] = molecules[mol].max_e
 
-         ready = []
-         path_positions = {}
-         path_indexs = {path: [] for path in tasks_by_path}
-         path_failed = set()
-         for source_path, tasks in tasks_by_path.items():
-            ready.append(tasks[0])
-            path_positions[source_path] = 1
-         ready.sort(key=lambda item: item['order'])
-
-         active = {}
-         result_queue = mp.Queue()
-
-         def queue_next_task(source_path):
-            if source_path in path_failed:
-               return
-            position = path_positions[source_path]
-            tasks = tasks_by_path[source_path]
-            if position >= len(tasks):
-               return
-            ready.append(tasks[position])
-            path_positions[source_path] = position + 1
-            ready.sort(key=lambda item: item['order'])
-
-         def skip_path_tasks(source_path):
-            remaining = len(tasks_by_path[source_path]) - path_positions[source_path]
-            if remaining > 0:
-               counts['skipped'] += remaining
-               print('-  loader: skipping {:d} queued dataset entries for {:s}'.format(remaining, source_path))
-               path_positions[source_path] = len(tasks_by_path[source_path])
-
-         def record_failure(task, failure_mode, elapsed, message):
-            source_path = task['source_path']
-            path_failed.add(source_path)
-            counts['failed'] += 1
-            print('-  loader: {:s} failed ({:s}) after {:s}: {}'.format(
-                task['mol'], failure_mode, self._format_elapsed(elapsed), message))
-            quarantine_path = self._quarantine_dataset_file(
-                source_path=source_path,
-                quarantine_dir=quarantine_dir,
-                log_file=loader_log_file,
-                failure_mode=failure_mode,
-                mol=task['mol'],
-                elapsed=elapsed,
-                message=message,
-            )
-            if quarantine_path is not None:
-               counts['quarantined'] += 1
-            skip_path_tasks(source_path)
-
-         def launch_task(task):
-            worker_task = dict(task)
-            worker_task['nindex'] = list(path_indexs[task['source_path']])
-            process = mp.Process(target=_parallel_reax_data_worker, args=(worker_task, result_queue))
-            process.daemon = False
-            process.start()
-            active[task['mol']] = {
-                'process': process,
-                'task': task,
-                'start': time.time(),
-                'exit_seen_at': None,
-            }
-            print('-  loader: launched {:s} [{:d}/{:d}] from {:s}'.format(
-                task['mol'], task['order'] + 1, len(dataset_items), os.path.basename(task['source_path'])))
-
-         while ready or active:
-            while ready and len(active) < worker_limit:
-               launch_task(ready.pop(0))
-
-            result = None
-            if active:
-               try:
-                  result = result_queue.get(timeout=1.0)
-               except queue_module.Empty:
-                  result = None
-
-            if result is not None:
-               mol = result.get('mol')
-               state = active.pop(mol, None)
-               if state is not None:
-                  process = state['process']
-                  process.join(timeout=0.2)
-                  task = state['task']
-                  elapsed = float(result.get('elapsed', time.time() - state['start']))
-                  if result.get('status') and result.get('payload_path') and exists(result['payload_path']):
-                     successful[task['order']] = result
-                     counts['loaded'] += 1
-                     path_indexs[task['source_path']].extend(result.get('indexs', []))
-                     print('-  loader: completed {:s} in {:s} ({:s})'.format(
-                         task['mol'], self._format_elapsed(elapsed), os.path.basename(task['source_path'])))
-                     queue_next_task(task['source_path'])
-                  else:
-                     message = result.get('message') or 'worker returned without a payload'
-                     traceback_text = result.get('traceback')
-                     if traceback_text:
-                        print(traceback_text)
-                     record_failure(task, result.get('failure_mode', 'load_error'), elapsed, message)
-
-            now = time.time()
-            for mol, state in list(active.items()):
-               process = state['process']
-               elapsed = now - state['start']
-               if process.is_alive():
-                  if elapsed <= timeout_seconds:
-                     continue
-                  process.terminate()
-                  process.join(timeout=2.0)
-                  if process.is_alive() and hasattr(process, 'kill'):
-                     process.kill()
-                     process.join(timeout=1.0)
-                  active.pop(mol, None)
-                  record_failure(state['task'],
-                                 'timeout',
-                                 elapsed,
-                                 'exceeded loader timeout of {:s}'.format(self._format_elapsed(timeout_seconds)))
-               else:
-                  if state['exit_seen_at'] is None:
-                     state['exit_seen_at'] = now
-                     continue
-                  if now - state['exit_seen_at'] < 2.0:
-                     continue
-                  process.join(timeout=0.1)
-                  active.pop(mol, None)
-                  record_failure(state['task'],
-                                 'worker_error',
-                                 elapsed,
-                                 'worker exited without returning a payload (exitcode={:s})'.format(str(process.exitcode)))
-
-         result_queue.close()
-         result_queue.join_thread()
-      else:
-         print('-  loader: no dataset files configured.')
-
-      for order, mol, _ in dataset_items:
-         result = successful.get(order)
-         if result is None:
-            continue
-         payload_path = result['payload_path']
-         try:
-            with open(payload_path, 'rb') as handle:
-               data_ = pickle.load(handle)
-         except Exception as exc:
-            counts['loaded'] = max(0, counts['loaded'] - 1)
-            counts['failed'] += 1
-            print('-  loader: payload restore failed for {:s}: {!r}'.format(mol, exc))
-            self._append_loader_log(log_file=loader_log_file,
-                                    failure_mode='load_error',
-                                    mol=mol,
-                                    source_path=self.dataset[mol],
-                                    message='payload restore failed: {!r}'.format(exc))
-            continue
-         finally:
-            if payload_path and exists(payload_path):
-               os.remove(payload_path)
-
-         self.mols.append(mol)
-         molecules[mol] = data_
-         self.nframe += self.batch
-         print('- max energy of %s: %f.' %(mol, molecules[mol].max_e))
-         self.max_e[mol] = molecules[mol].max_e
-         self.ecoul_[mol] = molecules[mol].ecoul
-         self.eself[mol] = molecules[mol].eself
-
-      print('-  loader summary: loaded {:d}, quarantined {:d}, failed {:d}, skipped {:d}'.format(
-          counts['loaded'], counts['quarantined'], counts['failed'], counts['skipped']))
+      #        # self.evdw_[mol]= molecules[mol].evdw
+      #        self.ecoul_[mol] = molecules[mol].ecoul  
+                  
+      #        self.eself[mol] = molecules[mol].eself    
+      #        # self.nbe0[mol]= molecules[mol].nbe0   
+      #        # self.cell[mol]  = molecules[mol].cell
+      #        # self.bf[mol]    = tf.constant(molecules[mol].bf,dtype=tf.float32)
+      #     else:
+      #        print('-  data status of %s:' %mol,data_.status)
       self.nmol = len(molecules)
-
-      if self.nmol == 0 and dataset_items:
-         raise RuntimeError('-  Error: no datasets loaded successfully. Check {:s} for failures.'.format(loader_log_file))
 
       if self.data_invariant:
          self.D_inv_,self.Dt_inv_,self.D_inv_mol_,self.Dt_inv_mol_,self.nbd_inv = get_md_data_inv(

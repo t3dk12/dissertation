@@ -188,11 +188,7 @@ class MPNN(ReaxFF):
                conf_vale=None,
                huber_d=30.0,
                ncpu=None,
-               link_cache_dir=None,
-               loader_workers=None,
-               loader_timeout_seconds=900,
-               loader_quarantine_dir=None,
-               loader_log_file=None):
+               link_cache_dir=None):
       '''
          Message Passing Neural network build top on ReaxFF potentail
          version 3.0 
@@ -254,11 +250,7 @@ class MPNN(ReaxFF):
                       emse=emse,convergence=convergence,lossConvergence=lossConvergence,
                       losFunc=losFunc,conf_vale=conf_vale,
                       huber_d=huber_d,ncpu=ncpu,
-                      link_cache_dir=link_cache_dir,
-                      loader_workers=loader_workers,
-                      loader_timeout_seconds=loader_timeout_seconds,
-                      loader_quarantine_dir=loader_quarantine_dir,
-                      loader_log_file=loader_log_file)
+                      link_cache_dir=link_cache_dir)
       self.S        = {}
       self.esi      = {}
       self.fbo      = {}
