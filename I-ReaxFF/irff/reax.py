@@ -375,7 +375,7 @@ class ReaxFF(object):
 
   def _link_cache_signature(self,molecules):
       dataset_signature = []
-      for mol in self.dataset:
+      for mol in molecules:
          path = os.path.abspath(self.dataset[mol])
          stat = os.stat(path) if exists(path) else None
          dataset_signature.append({
