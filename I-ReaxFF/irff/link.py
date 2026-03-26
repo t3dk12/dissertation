@@ -111,6 +111,10 @@ class links(object):
           message += ' ({:s})'.format(extra)
       print(message)
 
+  def _log_stage_entry(self, name, molecules):
+      if self.progress:
+          print('-  [links] entering {:s} stage ({:d} molecules) ...'.format(name, len(molecules)))
+
   @staticmethod
   def _empty_index_array():
       return np.zeros((0, 1), dtype=np.int64)
@@ -132,11 +136,19 @@ class links(object):
 
   def update_links(self, molecules):
       total_start = time.time()
+      if self.progress:
+          print('-  [links] total: starting ({:d} molecules) ...'.format(len(molecules)))
+      self._log_stage_entry('bond', molecules)
       self.get_bond_link(molecules)
+      self._log_stage_entry('atom', molecules)
       self.get_atom_link(molecules)
+      self._log_stage_entry('angle', molecules)
       self.get_angle_link(molecules)
+      self._log_stage_entry('torsion', molecules)
       self.get_torsion_link(molecules)
+      self._log_stage_entry('vdw', molecules)
       self.get_vdw_link(molecules)
+      self._log_stage_entry('hb', molecules)
       self.get_hb_link(molecules)
       if hasattr(self, '_atom_index'):
           del self._atom_index
