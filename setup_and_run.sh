@@ -19,7 +19,8 @@ echo "[1/4] Running setup..."
 "${SETUP_SCRIPT}"
 
 run_in_env() {
-  conda run -n "${ENV_NAME}" "$@"
+  env -u CONDA_VERBOSITY -u CONDA_LOG_LEVEL \
+    conda run --no-capture-output -n "${ENV_NAME}" "$@"
 }
 
 echo "[2/4] Using ${ENV_NAME} via conda run..."
