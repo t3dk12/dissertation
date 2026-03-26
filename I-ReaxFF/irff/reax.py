@@ -225,7 +225,7 @@ class ReaxFF(object):
                ncpu=None,
                link_cache_dir=None,
                loader_workers=None,
-               loader_timeout_seconds=300,
+               loader_timeout_seconds=900,
                loader_quarantine_dir=None,
                loader_log_file=None):
       '''

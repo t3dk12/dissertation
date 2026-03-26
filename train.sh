@@ -48,18 +48,29 @@ TRAIN_A="${TRAIN_A:-0}"
 TRAIN_T="${TRAIN_T:-0}"
 TRAIN_F="${TRAIN_F:-0}"
 TRAIN_VDW="${TRAIN_VDW:-1}"
+TRAIN_LOADER_TIMEOUT="${TRAIN_LOADER_TIMEOUT:-900}"
+TRAIN_LOADER_WORKERS="${TRAIN_LOADER_WORKERS:-}"
 
-python -u "${ROOT_DIR}/run_scripts/train_without_force_Li_NN.py" \
-  --train_dir "${ROOT_DIR}/${TRAIN_DIR}" \
-  --ffield "${ROOT_DIR}/${TRAIN_FFIELD}" \
-  --s "${TRAIN_STEPS}" \
-  --lr "${TRAIN_LR}" \
-  --pr "${TRAIN_PR}" \
-  --writelib "${TRAIN_WRITELIB}" \
-  --batch "${TRAIN_BATCH}" \
-  --bo "${TRAIN_BO}" \
-  --h "${TRAIN_H}" \
-  --a "${TRAIN_A}" \
-  --t "${TRAIN_T}" \
-  --f "${TRAIN_F}" \
+train_cmd=(
+  python -u "${ROOT_DIR}/run_scripts/train_without_force_Li_NN.py"
+  --train_dir "${ROOT_DIR}/${TRAIN_DIR}"
+  --ffield "${ROOT_DIR}/${TRAIN_FFIELD}"
+  --s "${TRAIN_STEPS}"
+  --lr "${TRAIN_LR}"
+  --pr "${TRAIN_PR}"
+  --writelib "${TRAIN_WRITELIB}"
+  --batch "${TRAIN_BATCH}"
+  --bo "${TRAIN_BO}"
+  --h "${TRAIN_H}"
+  --a "${TRAIN_A}"
+  --t "${TRAIN_T}"
+  --f "${TRAIN_F}"
   --vdw "${TRAIN_VDW}"
+  --loader-timeout-seconds "${TRAIN_LOADER_TIMEOUT}"
+)
+
+if [[ -n "${TRAIN_LOADER_WORKERS}" ]]; then
+  train_cmd+=(--loader-workers "${TRAIN_LOADER_WORKERS}")
+fi
+
+"${train_cmd[@]}"

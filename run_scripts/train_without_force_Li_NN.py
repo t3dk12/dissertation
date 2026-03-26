@@ -38,6 +38,8 @@ def build_parser():
 
     # Dataset location
     parser.add_argument('--train_dir', default='data/traj/train', type=str, help='Directory containing the training .traj files.')
+    parser.add_argument('--loader-timeout-seconds', default=900, type=float, help='Per-file loader timeout in seconds before quarantine.')
+    parser.add_argument('--loader-workers', default=None, type=int, help='Optional override for loader workers; leave unset to use all CPU cores.')
 
     # Physics Control Flags (1 = Optimise / 0 = Freeze)
     parser.add_argument('--t', default=1, type=int, help='Toggle for three-body (angle) term optimisation.')
@@ -120,7 +122,9 @@ def main(argv=None):
               EnergyFunction=1,
               MessageFunction=3,
               messages=1,
-              energy_term={'ecoul': False, 'eunder': False, 'eover': False}
+              energy_term={'ecoul': False, 'eunder': False, 'eover': False},
+              loader_workers=args.loader_workers,
+              loader_timeout_seconds=args.loader_timeout_seconds
               )
 
     print(f"Starting MPNN training for {args.step} iterations with learning rate {args.lr}...")
