@@ -1,0 +1,20 @@
+Acknowledgements
+
+This repository builds on third-party open-source software.
+
+I-ReaxFF
+- Upstream project: https://github.com/fenggo/I-ReaxFF
+- Included path in this repository: I-ReaxFF/
+- Licence for that subdirectory: GNU Affero General Public License v3.0 (AGPL-3.0)
+- See: I-ReaxFF/LICENSE
+
+Licence boundary
+- The root LICENSE applies to original project files unless a file or
+  subdirectory states otherwise.
+- Files under I-ReaxFF/ (including modifications made there) are governed
+  by AGPL-3.0.
+
+Data and force-field inputs
+- Some force-field files and simulation data may originate from external
+  sources with their own terms. Check source provenance and permissions
+  before redistribution.
