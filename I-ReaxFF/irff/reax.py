@@ -27,6 +27,7 @@ import json as js
 tf.compat.v1.disable_eager_execution()
 
 import multiprocessing as mp
+from multiprocessing.pool import ThreadPool
 
 LINK_CACHE_VERSION = 1
 
@@ -425,17 +426,17 @@ class ReaxFF(object):
          
       ncores = mp.cpu_count()
       if sys.platform.startswith('linux'):
-         # TensorFlow is imported before dataset loading, so avoid forking the
-         # current process on Linux where fork can deadlock silently.
-         ctx = mp.get_context('spawn')
-         start_method = 'spawn'
+         # Large reax_data objects can stall or fail while being sent back from
+         # worker processes on Linux. Keep the objects in one process instead.
+         pool_factory = ThreadPool
+         pool_label = 'threads'
       else:
-         ctx = mp
-         start_method = mp.get_start_method()
+         pool_factory = mp.Pool
+         pool_label = 'processes'
 
-      print(f"- launching multiprocessing pool on {ncores} cores ({start_method})...")
+      print(f"- launching dataset loader on {ncores} {pool_label}...")
       results_by_mol = {}
-      with ctx.Pool(processes=ncores) as pool:
+      with pool_factory(processes=ncores) as pool:
          for mol, data_ in pool.imap_unordered(_parallel_reax_data, task_arguments):
             results_by_mol[mol] = data_
             print('-  collected dataset {:d}/{:d}: {:s}'.format(
