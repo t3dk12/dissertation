@@ -45,6 +45,7 @@ TRAIN_A="${TRAIN_A:-0}"
 TRAIN_T="${TRAIN_T:-0}"
 TRAIN_F="${TRAIN_F:-0}"
 TRAIN_VDW="${TRAIN_VDW:-1}"
+TRAIN_DATASET_GROUP="${TRAIN_DATASET_GROUP:-all}"
 
 is_dataset_ready() {
   local train_dir="${ROOT_DIR}/${BUILD_OUTPUT_DIR}/train"
@@ -170,7 +171,8 @@ else
     --a "${TRAIN_A}" \
     --t "${TRAIN_T}" \
     --f "${TRAIN_F}" \
-    --vdw "${TRAIN_VDW}"
+    --vdw "${TRAIN_VDW}" \
+    --dataset_group "${TRAIN_DATASET_GROUP}"
 fi
 
 echo "Done."
